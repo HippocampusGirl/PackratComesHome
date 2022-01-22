@@ -10,14 +10,14 @@ from tqdm import tqdm
 
 from dropbox import Dropbox
 from dropbox.exceptions import ApiError
-from dropbox.files import ListFolderResult, FolderMetadata, FileMetadata, DeletedMetadata, ListRevisionsResult
+from dropbox.files import ListFolderResult, FolderMetadata, FileMetadata, DeletedMetadata, ListRevisionsResult, SymlinkInfo
 from stone.backends.python_rsrc import stone_base
-from requests import ReadTimeout
+from requests import ReadTimeout, ConnectionError
 
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import exists
 
-from schema import FileEvent, ModifyEvent, DeleteEvent, FileError, ConnectionManager
+from schema import FileEvent, ModifyEvent, DeleteEvent, FileError, ConnectionManager, SymlinkEvent
 
 logging_basic_config(filename="populate.log")
 
@@ -25,7 +25,7 @@ chunk_size = 2 ** 8
 connection_manager = ConnectionManager()
 
 with open("config.yml", "r") as file_handle:
-    cfg = yaml.load(file_handle)
+    cfg = yaml.load(file_handle, Loader=yaml.Loader)
 
 dbx = Dropbox(cfg["dropbox_token"])
 
@@ -34,8 +34,8 @@ def robust_call(func, *args, **kwargs):
     while True:
         try:
             return func(*args, **kwargs)
-        except ReadTimeout as e:
-            error("Dropbox timeout %s", exc_info=e)
+        except (ReadTimeout, ConnectionError) as e:
+            error("Network error %s", exc_info=e)
             sleep(1e1)
 
 
@@ -65,12 +65,6 @@ def list_revisions(m: FileMetadata | FolderMetadata | DeletedMetadata) -> Genera
     if isinstance(m, FolderMetadata):
         return
 
-    if isinstance(m, FileMetadata):
-        if hasattr(m, "symlink_info"):
-            if m.symlink_info not in frozenset([None, stone_base.NOT_SET]):
-                warning("Cannot handle symlink %s", m)
-                return
-
     path: str = m.path_display
 
     try:
@@ -91,7 +85,7 @@ def list_revisions(m: FileMetadata | FolderMetadata | DeletedMetadata) -> Genera
             warning("Cannot handle revision %s", r)
             continue
 
-        yield ModifyEvent(
+        file_event_kwargs = dict(
             path=path,
             revision=r.rev,
 
@@ -99,7 +93,18 @@ def list_revisions(m: FileMetadata | FolderMetadata | DeletedMetadata) -> Genera
             is_downloadable=r.is_downloadable,
 
             timestamp=r.server_modified,
+        )
 
+        symlink_info = getattr(r, "symlink_info", None)
+        if isinstance(symlink_info, SymlinkInfo):
+            yield SymlinkEvent(
+                **file_event_kwargs,
+                target=symlink_info.target,
+            )
+            continue
+
+        yield ModifyEvent(
+            **file_event_kwargs,
             size=r.size,
             content_hash=r.content_hash,
         )
@@ -128,7 +133,7 @@ for m_iter in tqdm(ichunked(list_recursive(), chunk_size), unit="chunks"):
 
     session.add_all(
         chain.from_iterable(
-            list_revisions(m) for m in tqdm(m_iter, unit="paths")
+            list_revisions(m) for m in tqdm(m_iter, total=chunk_size, unit="paths", leave=False)
             if check_path_unseen(session, m.path_display)
         )
     )
