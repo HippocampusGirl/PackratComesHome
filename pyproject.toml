@@ -1,0 +1,17 @@
+[build-system]
+requires = [
+    "setuptools",
+    "setuptools_scm[toml]>=6.2", 
+    "wheel",
+]
+build-backend = "setuptools.build_meta"
+
+[tool.isort]
+profile = "black"
+
+[tool.setuptools_scm]
+version_scheme = "no-guess-dev"
+
+[tool.pytest.ini_options]
+log_cli = true
+log_cli_level = "INFO"

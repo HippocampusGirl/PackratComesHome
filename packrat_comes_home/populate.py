@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 from typing import Generator
 
 from logging import warning, error, basicConfig as logging_basic_config
@@ -10,24 +12,37 @@ from tqdm import tqdm
 
 from dropbox import Dropbox
 from dropbox.exceptions import ApiError
-from dropbox.files import ListFolderResult, FolderMetadata, FileMetadata, DeletedMetadata, ListRevisionsResult, SymlinkInfo
-from stone.backends.python_rsrc import stone_base
+from dropbox.files import (
+    ListFolderResult,
+    FolderMetadata,
+    FileMetadata,
+    DeletedMetadata,
+    ListRevisionsResult,
+    SymlinkInfo,
+)
 from requests import ReadTimeout, ConnectionError
 
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import exists
 
-from schema import FileEvent, ModifyEvent, DeleteEvent, FileError, ConnectionManager, SymlinkEvent
+from schema import (
+    FileEvent,
+    ModifyEvent,
+    DeleteEvent,
+    FileError,
+    ConnectionManager,
+    SymlinkEvent,
+)
 
 logging_basic_config(filename="populate.log")
 
-chunk_size = 2 ** 8
+chunk_size = 2**8
 connection_manager = ConnectionManager()
 
 with open("config.yml", "r") as file_handle:
-    cfg = yaml.load(file_handle, Loader=yaml.Loader)
+    configuration = yaml.load(file_handle, Loader=yaml.Loader)
 
-dbx = Dropbox(cfg["dropbox_token"])
+dbx = Dropbox(configuration["dropbox_token"])
 
 
 def robust_call(func, *args, **kwargs):
@@ -39,8 +54,9 @@ def robust_call(func, *args, **kwargs):
             sleep(1e1)
 
 
-
-def list_recursive() -> Generator[FileMetadata | FolderMetadata | DeletedMetadata, None, None]:
+def list_recursive() -> Generator[
+    FileMetadata | FolderMetadata | DeletedMetadata, None, None
+]:
     list_folder_result = robust_call(
         dbx.files_list_folder,
         "",
@@ -61,7 +77,9 @@ def list_recursive() -> Generator[FileMetadata | FolderMetadata | DeletedMetadat
         assert isinstance(list_folder_result, ListFolderResult)
 
 
-def list_revisions(m: FileMetadata | FolderMetadata | DeletedMetadata) -> Generator[FileEvent, None, None]:
+def list_revisions(
+    m: FileMetadata | FolderMetadata | DeletedMetadata,
+) -> Generator[FileEvent | FileError, None, None]:
     if isinstance(m, FolderMetadata):
         return
 
@@ -88,10 +106,8 @@ def list_revisions(m: FileMetadata | FolderMetadata | DeletedMetadata) -> Genera
         file_event_kwargs = dict(
             path=path,
             revision=r.rev,
-
             is_deleted=False,
             is_downloadable=r.is_downloadable,
-
             timestamp=r.server_modified,
         )
 
@@ -112,10 +128,8 @@ def list_revisions(m: FileMetadata | FolderMetadata | DeletedMetadata) -> Genera
     if list_revisions_result.is_deleted is True:
         yield DeleteEvent(
             path=path,
-
             is_deleted=True,
             is_downloadable=False,
-
             timestamp=list_revisions_result.server_deleted,
         )
 
@@ -133,7 +147,8 @@ for m_iter in tqdm(ichunked(list_recursive(), chunk_size), unit="chunks"):
 
     session.add_all(
         chain.from_iterable(
-            list_revisions(m) for m in tqdm(m_iter, total=chunk_size, unit="paths", leave=False)
+            list_revisions(m)
+            for m in tqdm(m_iter, total=chunk_size, unit="paths", leave=False)
             if check_path_unseen(session, m.path_display)
         )
     )
