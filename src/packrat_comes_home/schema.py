@@ -1,11 +1,15 @@
+# -*- coding: utf-8 -*-
+# emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
+# vi: set ft=python sts=4 ts=4 sw=4 et:
+
 from dataclasses import dataclass
 from datetime import datetime
 
 from sqlalchemy import create_engine, Column, String, DateTime, Boolean, Integer
-from sqlalchemy import orm
+from sqlalchemy.orm import registry, Session, sessionmaker
 from sqlalchemy.pool import NullPool
 
-mapper_registry: orm.registry = orm.registry()
+mapper_registry: registry = registry()
 
 
 @mapper_registry.mapped
@@ -74,7 +78,7 @@ class ConnectionManager:
         self.engine.connect()
 
         mapper_registry.metadata.create_all(self.engine)
-        self.sessionmaker = orm.sessionmaker(bind=self.engine)
+        self.sessionmaker = sessionmaker(bind=self.engine)
 
-    def make_session(self) -> orm.Session:
+    def make_session(self) -> Session:
         return self.sessionmaker()

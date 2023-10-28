@@ -1,40 +1,37 @@
-#!/usr/bin/env python
-
-from typing import Generator
-
-from logging import warning, error, basicConfig as logging_basic_config
-from time import sleep
-import yaml
+# -*- coding: utf-8 -*-
+# emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
+# vi: set ft=python sts=4 ts=4 sw=4 et:
 
 from itertools import chain
-from more_itertools import ichunked
-from tqdm import tqdm
+from time import sleep
+from typing import Generator
 
+import yaml
 from dropbox import Dropbox
 from dropbox.exceptions import ApiError
 from dropbox.files import (
-    ListFolderResult,
-    FolderMetadata,
-    FileMetadata,
     DeletedMetadata,
+    FileMetadata,
+    FolderMetadata,
+    ListFolderResult,
     ListRevisionsResult,
     SymlinkInfo,
 )
-from requests import ReadTimeout, ConnectionError
-
+from more_itertools import ichunked
+from requests import ConnectionError, ReadTimeout
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import exists
+from tqdm import tqdm
 
-from schema import (
-    FileEvent,
-    ModifyEvent,
+from .log import logger
+from .schema import (
+    ConnectionManager,
     DeleteEvent,
     FileError,
-    ConnectionManager,
+    FileEvent,
+    ModifyEvent,
     SymlinkEvent,
 )
-
-logging_basic_config(filename="populate.log")
 
 chunk_size = 2**8
 connection_manager = ConnectionManager()
@@ -50,13 +47,13 @@ def robust_call(func, *args, **kwargs):
         try:
             return func(*args, **kwargs)
         except (ReadTimeout, ConnectionError) as e:
-            error("Network error %s", exc_info=e)
+            logger.error("Network error %s", exc_info=e)
             sleep(1e1)
 
 
-def list_recursive() -> Generator[
-    FileMetadata | FolderMetadata | DeletedMetadata, None, None
-]:
+def list_recursive() -> (
+    Generator[FileMetadata | FolderMetadata | DeletedMetadata, None, None]
+):
     list_folder_result = robust_call(
         dbx.files_list_folder,
         "",
@@ -64,17 +61,18 @@ def list_recursive() -> Generator[
         include_mounted_folders=True,
         recursive=True,
     )
-    assert isinstance(list_folder_result, ListFolderResult)
+    if not isinstance(list_folder_result, ListFolderResult):
+        raise ValueError("Cannot handle list_folder_result %s", list_folder_result)
 
     while list_folder_result.has_more is True:
-
         yield from list_folder_result.entries
 
         list_folder_result = robust_call(
             dbx.files_list_folder_continue,
             list_folder_result.cursor,
         )
-        assert isinstance(list_folder_result, ListFolderResult)
+        if not isinstance(list_folder_result, ListFolderResult):
+            raise ValueError("Cannot handle list_folder_result %s", list_folder_result)
 
 
 def list_revisions(
@@ -92,15 +90,14 @@ def list_revisions(
         return
 
     if not isinstance(list_revisions_result, ListRevisionsResult):
-        warning("Cannot handle list_revisions_result %s", list_revisions_result)
+        logger.warning("Cannot handle list_revisions_result %s", list_revisions_result)
         return
 
     revisions = list_revisions_result.entries
 
     for r in revisions:
-
         if not isinstance(r, FileMetadata):
-            warning("Cannot handle revision %s", r)
+            logger.warning("Cannot handle revision %s", r)
             continue
 
         file_event_kwargs = dict(
@@ -142,15 +139,16 @@ def check_path_unseen(session: Session, p: str) -> bool:
     return (file_event_exists is not True) and (file_error_exists is not True)
 
 
-for m_iter in tqdm(ichunked(list_recursive(), chunk_size), unit="chunks"):
-    session = connection_manager.make_session()
+def populate():
+    for m_iter in tqdm(ichunked(list_recursive(), chunk_size), unit="chunks"):
+        session = connection_manager.make_session()
 
-    session.add_all(
-        chain.from_iterable(
-            list_revisions(m)
-            for m in tqdm(m_iter, total=chunk_size, unit="paths", leave=False)
-            if check_path_unseen(session, m.path_display)
+        session.add_all(
+            chain.from_iterable(
+                list_revisions(m)
+                for m in tqdm(m_iter, total=chunk_size, unit="paths", leave=False)
+                if check_path_unseen(session, m.path_display)
+            )
         )
-    )
 
-    session.commit()
+        session.commit()
