@@ -1,13 +1,24 @@
+[project]
+name = "packrat-comes-home"
+dynamic = ["version"]
+
+requires-python = ">=3.11"
+
+dependencies = ["more_itertools", "dropbox", "sqlalchemy", "tqdm", "pyyaml"]
+
+[project.scripts]
+packrat-comes-home = "packrat_comes_home.cli:run"
+
 [build-system]
-requires = [
-    "setuptools",
-    "setuptools_scm[toml]>=6.2", 
-    "wheel",
-]
+requires = ["setuptools", "setuptools_scm[toml]>=6.2", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.isort]
+line_length = 88
 profile = "black"
+
+[tool.pylint.format]
+max-line-length = "88"
 
 [tool.setuptools_scm]
 version_scheme = "no-guess-dev"
