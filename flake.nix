@@ -16,15 +16,19 @@
           config.allowUnfree = true;
         };
 
-        python = pkgs.python311.withPackages (py:
+        python = pkgs.python313.withPackages (py:
           with py; [
             dropbox
             more-itertools
+            mypy
             pip
             pyyaml
+            requests
             sqlalchemy
             tqdm
+            types-requests
             types-pyyaml
+            types-tqdm
           ]);
 
         # Loads pyproject.toml into a high-level project representation

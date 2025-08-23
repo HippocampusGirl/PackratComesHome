@@ -22,9 +22,12 @@ def _showwarning(message, category, filename, lineno, file=None, line=None):
     )
 
 
-def setup_logging(level: str | int, log_path: Path) -> None:
+def setup_logging(level: str | int, log_path: str | Path) -> None:
     root = logging.getLogger()
     root.setLevel(level)
+
+    dropbox = logging.getLogger("dropbox")
+    dropbox.setLevel(logging.WARNING)
 
     formatter = logging.Formatter(
         fmt="%(asctime)s [%(levelname)8s] %(funcName)s: "

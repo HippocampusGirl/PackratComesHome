@@ -4,28 +4,33 @@
 
 import logging
 from argparse import ArgumentParser
-from typing import Callable
 
-from packrat_comes_home.populate import populate
+from .download import download
+from .log import logger, setup_logging
+from .populate import populate
 
 
 def run():
-    logging.basicConfig(level=logging.INFO)
-
     argument_parser = ArgumentParser()
+    argument_parser.add_argument(
+        "--log-level", choices=logging.getLevelNamesMapping().keys(), default="INFO"
+    )
 
-    commands = argument_parser.add_subparsers(dest="command")
+    commands = argument_parser.add_subparsers(dest="command", required=True)
 
     populate_parser = commands.add_parser("populate")
     populate_parser.set_defaults(action=populate)
 
+    download_parser = commands.add_parser("download")
+    download_parser.set_defaults(action=download)
+
     arguments = argument_parser.parse_args()
     action = arguments.action
 
-    import pdb
+    setup_logging(level=arguments.log_level, log_path=f"{action.__name__}.log")
 
-    pdb.set_trace()
-
-    if not isinstance(action, Callable):
-        raise ValueError(f"Unknown action {action}")
-    action()
+    try:
+        action()
+    except Exception as e:
+        logger.exception("Exception: %s", e, exc_info=True)
+        raise e

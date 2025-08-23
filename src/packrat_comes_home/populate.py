@@ -3,8 +3,7 @@
 # vi: set ft=python sts=4 ts=4 sw=4 et:
 
 from itertools import chain
-from time import sleep
-from typing import Generator
+from typing import Iterator
 
 import yaml
 from dropbox import Dropbox
@@ -18,7 +17,6 @@ from dropbox.files import (
     SymlinkInfo,
 )
 from more_itertools import ichunked
-from requests import ConnectionError, ReadTimeout
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import exists
 from tqdm import tqdm
@@ -32,6 +30,7 @@ from .schema import (
     ModifyEvent,
     SymlinkEvent,
 )
+from .utils import robust_call
 
 chunk_size = 2**8
 connection_manager = ConnectionManager()
@@ -42,18 +41,7 @@ with open("config.yml", "r") as file_handle:
 dbx = Dropbox(configuration["dropbox_token"])
 
 
-def robust_call(func, *args, **kwargs):
-    while True:
-        try:
-            return func(*args, **kwargs)
-        except (ReadTimeout, ConnectionError) as e:
-            logger.error("Network error %s", exc_info=e)
-            sleep(1e1)
-
-
-def list_recursive() -> (
-    Generator[FileMetadata | FolderMetadata | DeletedMetadata, None, None]
-):
+def list_recursive() -> Iterator[FileMetadata | FolderMetadata | DeletedMetadata]:
     list_folder_result = robust_call(
         dbx.files_list_folder,
         "",
@@ -77,7 +65,7 @@ def list_recursive() -> (
 
 def list_revisions(
     m: FileMetadata | FolderMetadata | DeletedMetadata,
-) -> Generator[FileEvent | FileError, None, None]:
+) -> Iterator[FileEvent | FileError]:
     if isinstance(m, FolderMetadata):
         return
 
@@ -125,6 +113,7 @@ def list_revisions(
     if list_revisions_result.is_deleted is True:
         yield DeleteEvent(
             path=path,
+            revision=None,
             is_deleted=True,
             is_downloadable=False,
             timestamp=list_revisions_result.server_deleted,

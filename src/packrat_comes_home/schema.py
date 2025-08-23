@@ -2,82 +2,68 @@
 # emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
 # vi: set ft=python sts=4 ts=4 sw=4 et:
 
-from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import create_engine, Column, String, DateTime, Boolean, Integer
-from sqlalchemy.orm import registry, Session, sessionmaker
+from sqlalchemy import String, create_engine
+from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 from sqlalchemy.pool import NullPool
 
-mapper_registry: registry = registry()
+
+class Base(DeclarativeBase):
+    pass
 
 
-@mapper_registry.mapped
-@dataclass
-class FileEvent:
+class FileEvent(Base):
     __tablename__ = "file_events"
-
-    path: str = Column(String, primary_key=True)
-    revision: str | None = Column(String, primary_key=True, nullable=True)
-
-    type: str = Column(String, nullable=False)
-
-    timestamp: datetime = Column(DateTime, nullable=False, index=True)
-
-    is_downloadable: bool = Column(Boolean, nullable=False)
-    is_deleted: bool = Column(Boolean, nullable=False)
-
     __mapper_args__ = dict(
         polymorphic_on="type",
         polymorphic_identity="file_event",
     )
 
+    path: Mapped[str] = mapped_column(primary_key=True)
+    revision: Mapped[str | None] = mapped_column(primary_key=True)
 
-@mapper_registry.mapped
-@dataclass
+    timestamp: Mapped[datetime] = mapped_column(index=True)
+
+    type: Mapped[str]
+    is_downloadable: Mapped[bool]
+    is_deleted: Mapped[bool]
+
+
 class ModifyEvent(FileEvent):
-    size: int | None = Column(Integer, nullable=True)
-    content_hash: str | None = Column(String(64), nullable=True)
-
     __mapper_args__ = dict(
         polymorphic_identity="modify",
     )
+    size: Mapped[int] = mapped_column(nullable=True)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=True)
 
 
-@mapper_registry.mapped
-@dataclass
 class DeleteEvent(FileEvent):
     __mapper_args__ = dict(
         polymorphic_identity="delete",
     )
 
 
-@mapper_registry.mapped
-@dataclass
 class SymlinkEvent(FileEvent):
-    target: str = Column(String)
-
     __mapper_args__ = dict(
         polymorphic_identity="symlink",
     )
+    target: Mapped[str] = mapped_column(nullable=True)
 
 
-@mapper_registry.mapped
-@dataclass
-class FileError:
+class FileError(Base):
     __tablename__ = "file_errors"
 
-    path: str = Column(String, primary_key=True)
-
-    message: str | None = Column(String, nullable=True)
+    path: Mapped[str] = mapped_column(primary_key=True)
+    message: Mapped[str | None]
 
 
 class ConnectionManager:
-    def __init__(self, url: str = "sqlite:///packrat.db") -> None:
+    def __init__(self, url: str = "sqlite:///packrat.sqlite") -> None:
         self.engine = create_engine(url, poolclass=NullPool)
         self.engine.connect()
 
-        mapper_registry.metadata.create_all(self.engine)
+        Base.metadata.create_all(self.engine)
         self.sessionmaker = sessionmaker(bind=self.engine)
 
     def make_session(self) -> Session:
