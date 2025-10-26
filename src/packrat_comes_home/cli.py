@@ -15,6 +15,8 @@ def run():
     argument_parser.add_argument(
         "--log-level", choices=logging.getLevelNamesMapping().keys(), default="INFO"
     )
+    argument_parser.add_argument("--user", type=str, default="lea")
+    argument_parser.add_argument("--group", type=str, default="users")
 
     commands = argument_parser.add_subparsers(dest="command", required=True)
 
@@ -30,7 +32,7 @@ def run():
     setup_logging(level=arguments.log_level, log_path=f"{action.__name__}.log")
 
     try:
-        action()
+        action(arguments)
     except Exception as e:
         logger.exception("Exception: %s", e, exc_info=True)
         raise e

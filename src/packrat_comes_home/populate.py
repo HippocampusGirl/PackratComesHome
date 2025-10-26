@@ -2,8 +2,9 @@
 # emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
 # vi: set ft=python sts=4 ts=4 sw=4 et:
 
+from argparse import Namespace
 from itertools import chain
-from typing import Iterator
+from typing import Any, Iterator
 
 import yaml
 from dropbox import Dropbox
@@ -42,7 +43,7 @@ dbx = Dropbox(configuration["dropbox_token"])
 
 
 def list_recursive() -> Iterator[FileMetadata | FolderMetadata | DeletedMetadata]:
-    list_folder_result = robust_call(
+    list_folder_result: Any = robust_call(
         dbx.files_list_folder,
         "",
         include_deleted=True,
@@ -72,7 +73,9 @@ def list_revisions(
     path: str = m.path_display
 
     try:
-        list_revisions_result = robust_call(dbx.files_list_revisions, path)
+        list_revisions_result: Any = robust_call(
+            dbx.files_list_revisions, path, limit=100
+        )
     except ApiError as e:
         yield FileError(path=path, message=repr(e))
         return
@@ -122,13 +125,12 @@ def list_revisions(
 
 def check_path_unseen(session: Session, p: str) -> bool:
     file_event_exists = session.query(exists().where(FileEvent.path == p)).scalar()
-
     file_error_exists = session.query(exists().where(FileError.path == p)).scalar()
 
     return (file_event_exists is not True) and (file_error_exists is not True)
 
 
-def populate():
+def populate(_: Namespace) -> None:
     for m_iter in tqdm(ichunked(list_recursive(), chunk_size), unit="chunks"):
         session = connection_manager.make_session()
 

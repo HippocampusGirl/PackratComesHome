@@ -2,7 +2,9 @@
 # emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
 # vi: set ft=python sts=4 ts=4 sw=4 et:
 
+from argparse import Namespace
 import os
+import shutil
 import subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
@@ -12,6 +14,7 @@ from itertools import groupby
 from pathlib import Path
 
 import sqlalchemy as sa
+from sqlalchemy import orm
 import yaml
 from dropbox import Dropbox
 from tqdm import tqdm
@@ -48,6 +51,8 @@ def is_empty(path: Path) -> bool:
 
 def truncate(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    if path.is_symlink():
+        path.unlink()
     with open(path, "w"):  # empty file as placeholder
         pass
 
@@ -65,7 +70,10 @@ def get_snapshot_name(snap_datetime: datetime) -> str:
 
 @dataclass
 class Downloader:
-    session: sa.orm.Session
+    user: str
+    group: str
+
+    session: orm.Session
     chunk_size: int = 2**8
 
     configuration: dict[str, str] = field(init=False)
@@ -104,12 +112,16 @@ class Downloader:
     def set_mtime(
         self, path: Path, seconds: float, update_parents: bool = False
     ) -> None:
-        os.utime(path, times=(seconds, seconds))
-        if update_parents:  # set folder mtime on file create
-            for parent in path.parents:
-                if parent == self.base_path:
-                    break
-                os.utime(parent, times=(seconds, seconds))
+        try:
+            shutil.chown(path, user=self.user, group=self.group)
+            os.utime(path, times=(seconds, seconds))
+            if update_parents:  # set folder mtime on file create
+                for parent in path.parents:
+                    if parent == self.base_path:
+                        break
+                    os.utime(parent, times=(seconds, seconds))
+        except FileNotFoundError:
+            logger.warning(f'Cannot set mtime for non-existent "{path}"')
 
     def download_file(self, file: FileEvent) -> None:
         if not isinstance(file.path, str):
@@ -143,16 +155,14 @@ class Downloader:
             is_new_file = not path.is_file()
 
             truncate(path)
-
             path.unlink()
 
             if not isinstance(file.target, str):
                 raise ValueError('File object is missing "target" attribute')
-            target = self.base_path / file.target.lstrip("/")
-            path.symlink_to(target)
+            path.symlink_to(file.target)
 
         elif isinstance(file, DeleteEvent):
-            if path.is_file():
+            if path.is_file() or path.is_symlink():
                 logger.debug(f'Delete "{path}"')
                 path.unlink()
             elif self.is_first_snapshot:
@@ -205,7 +215,7 @@ class Downloader:
             f"Applying {len(file_events)} revisions from "
             f"{file_events[0].timestamp} to {timestamp}"
         )
-        with ThreadPoolExecutor(max_workers=4) as executor:
+        with ThreadPoolExecutor(max_workers=1) as executor:
             futures = list()
             for file in file_events:
                 future = executor.submit(self.download_file, file)
@@ -253,11 +263,11 @@ class Downloader:
         self.take_snapshot(min_datetime)
 
 
-def download() -> None:
+def download(arguments: Namespace) -> None:
     # Setup
     connection_manager = ConnectionManager()
     session = connection_manager.make_session()
-    downloader = Downloader(session)
+    downloader = Downloader(arguments.user, arguments.group, session)
 
     # Initial state
     if is_empty(downloader.base_path):

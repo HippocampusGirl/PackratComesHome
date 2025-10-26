@@ -55,7 +55,7 @@
 
       in {
         devShells.default = pkgs.mkShell {
-          buildInputs = [ python ] ++ scripts;
+          buildInputs = [ python pkgs.sqlite ] ++ scripts;
           shellHook = ''
             PYTHONPATH=$(git rev-parse --show-toplevel)/src:$PYTHONPATH
             export PYTHONPATH
